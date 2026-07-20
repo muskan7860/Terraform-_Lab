@@ -1,0 +1,45 @@
+# ==========================================
+# Terraform
+# ==========================================
+
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ==========================================
+# Terraform Variables
+# ==========================================
+
+terraform.tfvars
+*.auto.tfvars
+
+# ==========================================
+# Sensitive Files
+# ==========================================
+
+*.pem
+*.key
+
+# Ignore private key only
+terrra-key-ec2
+
+# ==========================================
+# IDE
+# ==========================================
+
+.vscode/
+.idea/
+
+# ==========================================
+# OS Files
+# ==========================================
+
+.DS_Store
+Thumbs.db

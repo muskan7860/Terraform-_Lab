@@ -1,0 +1,10 @@
+muskan@muskan-ThinkPad-L14-Gen-1:~/Documents/Terraform/terraform_ec2_project1$ terraform plan
+var.ami_id
+  Enter the AMI ID
+
+  Enter a value: ami-01a00762f46d584a1
+
+var.instance_type
+  Enter EC2 Instance Type (Example: t3.micro)
+
+  Enter a value: t3.micro
