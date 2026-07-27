@@ -4,37 +4,26 @@ pipeline {
         label 'terraform'
     }
 
-    options {
-    skipDefaultCheckout(true)
-    disableConcurrentBuilds()
-}
-
     parameters {
 
         choice(
-            name: 'ENVIRONMENT',
+            name: 'ENV',
             choices: ['dev', 'stage', 'prod'],
-            description: 'Terraform Workspace'
+            description: 'Select Terraform Workspace'
         )
 
         choice(
             name: 'ACTION',
-            choices: ['plan', 'apply', 'destroy'],
+            choices: ['plan','apply','destroy'],
             description: 'Terraform Action'
-        )
-
-        booleanParam(
-            name: 'CREATE_BACKEND',
-            defaultValue: false,
-            description: 'Create S3 Bucket & DynamoDB if not present'
         )
 
     }
 
     environment {
 
-        AWS_DEFAULT_REGION = "ap-south-1"
-        TF_IN_AUTOMATION = "true"
+        BACKEND_DIR = "terraform-megha-project/backend"
+        INFRA_DIR   = "terraform-megha-project/infra-app"
 
     }
 
@@ -48,33 +37,26 @@ pipeline {
 
         stage('Verify Tools') {
             steps {
+
                 sh '''
                 terraform version
                 aws --version
                 git --version
                 '''
+
             }
         }
 
         stage('Create Backend') {
 
-            when {
-                expression {
-                    params.CREATE_BACKEND
-                }
-            }
-
             steps {
 
-                dir('backend') {
+                dir("${BACKEND_DIR}") {
 
                     sh """
-                    terraform init \
-                    -backend-config=${params.ENVIRONMENT}.hcl
-
-                    terraform validate
-
-                    terraform apply -auto-approve
+                        terraform init
+                        terraform validate
+                        terraform apply -auto-approve
                     """
 
                 }
@@ -87,29 +69,12 @@ pipeline {
 
             steps {
 
-                dir('infra-app') {
-
-                    sh '''
-                    terraform init
-                    '''
-
-                }
-
-            }
-
-        }
-
-        stage('Terraform Workspace') {
-
-            steps {
-
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
                     sh """
-                    terraform workspace select ${params.ENVIRONMENT} || \
-                    terraform workspace new ${params.ENVIRONMENT}
-
-                    terraform workspace list
+                    terraform init \
+                    -backend-config=../backend/${params.ENV}.hcl \
+                    -reconfigure
                     """
 
                 }
@@ -118,13 +83,15 @@ pipeline {
 
         }
 
-        stage('Terraform Validate') {
+        stage('Workspace') {
 
             steps {
 
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
-                    sh 'terraform validate'
+                    sh """
+                    terraform workspace select ${params.ENV} || terraform workspace new ${params.ENV}
+                    """
 
                 }
 
@@ -132,13 +99,16 @@ pipeline {
 
         }
 
-        stage('Terraform Format Check') {
+        stage('Validate') {
 
             steps {
 
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
-                    sh 'terraform fmt -check -recursive'
+                    sh '''
+                    terraform validate
+                    terraform fmt -check
+                    '''
 
                 }
 
@@ -148,15 +118,26 @@ pipeline {
 
         stage('Terraform Plan') {
 
+            when {
+
+                anyOf {
+
+                    expression { params.ACTION=="plan" }
+                    expression { params.ACTION=="apply" }
+
+                }
+
+            }
+
             steps {
 
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
-                    sh '''
-                    terraform plan -out=tfplan
-                    '''
-
-                    archiveArtifacts artifacts: 'tfplan'
+                    sh """
+                    terraform plan \
+                    -var-file=terraform.tfvars \
+                    -out=tfplan
+                    """
 
                 }
 
@@ -170,7 +151,7 @@ pipeline {
 
                 expression {
 
-                    params.ACTION == "apply"
+                    params.ACTION=="apply"
 
                 }
 
@@ -178,11 +159,7 @@ pipeline {
 
             steps {
 
-                timeout(time: 5, unit: 'MINUTES') {
-
-                    input "Approve ${params.ENVIRONMENT.toUpperCase()} Deployment?"
-
-                }
+                input "Deploy ${params.ENV} Infrastructure?"
 
             }
 
@@ -194,7 +171,7 @@ pipeline {
 
                 expression {
 
-                    params.ACTION == "apply"
+                    params.ACTION=="apply"
 
                 }
 
@@ -202,7 +179,7 @@ pipeline {
 
             steps {
 
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
                     sh '''
                     terraform apply -auto-approve tfplan
@@ -220,7 +197,7 @@ pipeline {
 
                 expression {
 
-                    params.ACTION == "destroy"
+                    params.ACTION=="destroy"
 
                 }
 
@@ -228,11 +205,13 @@ pipeline {
 
             steps {
 
-                dir('infra-app') {
+                dir("${INFRA_DIR}") {
 
-                    sh '''
-                    terraform destroy -auto-approve
-                    '''
+                    sh """
+                    terraform destroy \
+                    -auto-approve \
+                    -var-file=terraform.tfvars
+                    """
 
                 }
 
@@ -246,55 +225,37 @@ pipeline {
 
         success {
 
+            echo "Deployment Successful"
+
+            // Uncomment after Slack Plugin installation
+            /*
             slackSend(
                 channel: '#terraform-jenkins',
                 color: 'good',
-                message: """
-:white_check_mark: *Terraform Deployment Successful*
-
-Job : ${env.JOB_NAME}
-
-Build : #${env.BUILD_NUMBER}
-
-Environment : ${params.ENVIRONMENT}
-
-Action : ${params.ACTION}
-
-Build URL:
-${env.BUILD_URL}
-"""
+                message: "SUCCESS : ${params.ACTION} completed for ${params.ENV}"
             )
+            */
 
         }
 
         failure {
 
+            echo "Deployment Failed"
+
+            /*
             slackSend(
                 channel: '#terraform-jenkins',
                 color: 'danger',
-                message: """
-:x: *Terraform Deployment Failed*
-
-Job : ${env.JOB_NAME}
-
-Build : #${env.BUILD_NUMBER}
-
-Environment : ${params.ENVIRONMENT}
-
-Action : ${params.ACTION}
-
-Build URL:
-${env.BUILD_URL}
-"""
+                message: "FAILED : ${params.ACTION} for ${params.ENV}"
             )
+            */
 
         }
 
         always {
 
-            archiveArtifacts artifacts: '**/*.tfstate*', allowEmptyArchive: true
-
-            cleanWs()
+            archiveArtifacts artifacts: '**/tfplan', allowEmptyArchive: true
+            deleteDir()
 
         }
 
