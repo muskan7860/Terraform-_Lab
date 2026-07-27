@@ -1,6 +1,44 @@
 pipeline {
 
-    agent any
+    agent {
+        label 'linuxterraform'
+    }
+
+    options {
+        timestamps()
+        skipDefaultCheckout(true)
+        ansiColor('xterm')
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'stage', 'prod'],
+            description: 'Terraform Workspace'
+        )
+
+        choice(
+            name: 'ACTION',
+            choices: ['plan', 'apply', 'destroy'],
+            description: 'Terraform Action'
+        )
+
+        booleanParam(
+            name: 'CREATE_BACKEND',
+            defaultValue: false,
+            description: 'Create S3 Bucket & DynamoDB if not present'
+        )
+
+    }
+
+    environment {
+
+        AWS_DEFAULT_REGION = "ap-south-1"
+        TF_IN_AUTOMATION = "true"
+
+    }
 
     stages {
 
@@ -10,10 +48,256 @@ pipeline {
             }
         }
 
-        stage('Terraform Version') {
+        stage('Verify Tools') {
             steps {
-                sh 'terraform version'
+                sh '''
+                terraform version
+                aws --version
+                git --version
+                '''
             }
+        }
+
+        stage('Create Backend') {
+
+            when {
+                expression {
+                    params.CREATE_BACKEND
+                }
+            }
+
+            steps {
+
+                dir('backend') {
+
+                    sh """
+                    terraform init \
+                    -backend-config=${params.ENVIRONMENT}.hcl
+
+                    terraform validate
+
+                    terraform apply -auto-approve
+                    """
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Init') {
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh '''
+                    terraform init
+                    '''
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Workspace') {
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh """
+                    terraform workspace select ${params.ENVIRONMENT} || \
+                    terraform workspace new ${params.ENVIRONMENT}
+
+                    terraform workspace list
+                    """
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Validate') {
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh 'terraform validate'
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Format Check') {
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh 'terraform fmt -check -recursive'
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Plan') {
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh '''
+                    terraform plan -out=tfplan
+                    '''
+
+                    archiveArtifacts artifacts: 'tfplan'
+
+                }
+
+            }
+
+        }
+
+        stage('Approval') {
+
+            when {
+
+                expression {
+
+                    params.ACTION == "apply"
+
+                }
+
+            }
+
+            steps {
+
+                timeout(time: 5, unit: 'MINUTES') {
+
+                    input "Approve ${params.ENVIRONMENT.toUpperCase()} Deployment?"
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Apply') {
+
+            when {
+
+                expression {
+
+                    params.ACTION == "apply"
+
+                }
+
+            }
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh '''
+                    terraform apply -auto-approve tfplan
+                    '''
+
+                }
+
+            }
+
+        }
+
+        stage('Terraform Destroy') {
+
+            when {
+
+                expression {
+
+                    params.ACTION == "destroy"
+
+                }
+
+            }
+
+            steps {
+
+                dir('infra-app') {
+
+                    sh '''
+                    terraform destroy -auto-approve
+                    '''
+
+                }
+
+            }
+
+        }
+
+    }
+
+    post {
+
+        success {
+
+            slackSend(
+                channel: '#terraform-jenkins',
+                color: 'good',
+                message: """
+:white_check_mark: *Terraform Deployment Successful*
+
+Job : ${env.JOB_NAME}
+
+Build : #${env.BUILD_NUMBER}
+
+Environment : ${params.ENVIRONMENT}
+
+Action : ${params.ACTION}
+
+Build URL:
+${env.BUILD_URL}
+"""
+            )
+
+        }
+
+        failure {
+
+            slackSend(
+                channel: '#terraform-jenkins',
+                color: 'danger',
+                message: """
+:x: *Terraform Deployment Failed*
+
+Job : ${env.JOB_NAME}
+
+Build : #${env.BUILD_NUMBER}
+
+Environment : ${params.ENVIRONMENT}
+
+Action : ${params.ACTION}
+
+Build URL:
+${env.BUILD_URL}
+"""
+            )
+
+        }
+
+        always {
+
+            archiveArtifacts artifacts: '**/*.tfstate*', allowEmptyArchive: true
+
+            cleanWs()
+
         }
 
     }
