@@ -5,11 +5,9 @@ pipeline {
     }
 
     options {
-        timestamps()
-        skipDefaultCheckout(true)
-        ansiColor('xterm')
-        disableConcurrentBuilds()
-    }
+    skipDefaultCheckout(true)
+    disableConcurrentBuilds()
+}
 
     parameters {
 
