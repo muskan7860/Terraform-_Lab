@@ -50,6 +50,21 @@ pipeline {
                 git --version
                 '''
 
+                sh '''
+                echo "===== DNS DEBUG ====="
+
+                echo "HOME=$HOME"
+                echo "USER=$(whoami)"
+
+                cat /etc/resolv.conf
+
+                nslookup terraform-megha-project-tfstate.s3.ap-south-1.amazonaws.com || true
+
+                getent ahosts terraform-megha-project-tfstate.s3.ap-south-1.amazonaws.com || true
+
+                echo "====================="
+                '''
+
             }
         }
 
