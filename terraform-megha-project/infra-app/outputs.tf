@@ -24,7 +24,8 @@ output "security_group_id" {
 ####################################
 # Key Pair Outputs
 output "key_name" {
-  value = var.key_name
+  description = "Existing AWS Key Pair Name"
+  value       = var.key_name
 }
 ####################################
 # AMI Outputs
