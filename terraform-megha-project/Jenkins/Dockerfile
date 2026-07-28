@@ -32,4 +32,11 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.
     ./aws/install && \
     rm -rf aws awscliv2.zip
 
+#----------------------------------------------------
+# Configure Terraform Plugin Cache
+#----------------------------------------------------
+RUN mkdir -p /home/jenkins/.terraform.d/plugin-cache && \
+    echo 'plugin_cache_dir = "/home/jenkins/.terraform.d/plugin-cache"' > /home/jenkins/.terraformrc && \
+    chown -R jenkins:jenkins /home/jenkins/.terraform.d /home/jenkins/.terraformrc
+
 USER jenkins
