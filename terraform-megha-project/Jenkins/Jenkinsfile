@@ -226,10 +226,12 @@ pipeline {
                 dir("${INFRA_DIR}") {
 
                     sh """
+                    terraform workspace select ${params.ENV}
+
                     terraform destroy \
-                    -var-file=terraform.tfvars \
-                    -auto-approve \
-                    -input=false
+                      -var-file=terraform.tfvars \
+                      -auto-approve \
+                      -input=false
                     """
 
                 }
