@@ -48,21 +48,31 @@ pipeline {
         }
 
         stage('Create Backend') {
-
             steps {
-
-                dir("${BACKEND_DIR}") {
-
-                    sh """
+                dir('terraform-megha-project/backend') {
+                    sh '''
                         terraform init
-                        terraform validate
-                        terraform apply -auto-approve
-                    """
 
+                        aws s3api head-bucket \
+                          --bucket terraform-megha-project-tfstate \
+                          >/dev/null 2>&1
+
+                        S3_EXISTS=$?
+
+                        aws dynamodb describe-table \
+                          --table-name terraform-megha-project-locks \
+                          >/dev/null 2>&1
+
+                        DDB_EXISTS=$?
+
+                        if [ "$S3_EXISTS" -eq 0 ] && [ "$DDB_EXISTS" -eq 0 ]; then
+                            echo "Backend already exists. Skipping creation."
+                        else
+                            terraform apply -auto-approve
+                        fi
+                    '''
                 }
-
             }
-
         }
 
         stage('Terraform Init') {
@@ -106,7 +116,7 @@ pipeline {
                 dir("${INFRA_DIR}") {
 
                     sh '''
-                    terraform validate
+                    terraform validate -var-file=terraform.tfvars
                     terraform fmt -check
                     '''
 
@@ -136,7 +146,8 @@ pipeline {
                     sh """
                     terraform plan \
                     -var-file=terraform.tfvars \
-                    -out=tfplan
+                    -out=tfplan \
+                    -input=false
                     """
 
                 }
@@ -209,8 +220,9 @@ pipeline {
 
                     sh """
                     terraform destroy \
+                    -var-file=terraform.tfvars \
                     -auto-approve \
-                    -var-file=terraform.tfvars
+                    -input=false
                     """
 
                 }
