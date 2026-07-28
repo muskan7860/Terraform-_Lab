@@ -23,13 +23,9 @@ output "security_group_id" {
 
 ####################################
 # Key Pair Outputs
-####################################
-
 output "key_name" {
-  description = "EC2 Key Pair Name"
-  value       = module.keypair.key_name
+  value = var.key_name
 }
-
 ####################################
 # AMI Outputs
 ####################################

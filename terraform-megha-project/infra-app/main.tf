@@ -21,12 +21,11 @@ module "security_group" {
   vpc_id         = module.vpc.vpc_id
 }
 
-module "keypair" {
-  source          = "../modules/keypair"
-  project_name    = var.project_name
-  environment     = terraform.workspace
-  public_key_path = var.public_key_path
-}
+#module "keypair" {
+ # source          = "../modules/keypair"
+  #project_name    = var.project_name
+  #e#public_key_path = var.public_key_path
+#}
 
 module "ec2" {
 
@@ -41,7 +40,7 @@ module "ec2" {
 
   security_group_id = module.security_group.security_group_id
 
-  key_name = module.keypair.key_name
+  key_name = var.key_name
 
   instance_type = local.instance_type[terraform.workspace]
 

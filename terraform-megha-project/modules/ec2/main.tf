@@ -16,7 +16,7 @@ resource "aws_instance" "ec2" {
   associate_public_ip_address = var.associate_public_ip
 
   # SSH key
-  key_name = var.key_name
+   key_name = var.key_name
 
   # Root EBS olume
 

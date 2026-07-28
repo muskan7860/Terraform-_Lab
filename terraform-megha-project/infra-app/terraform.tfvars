@@ -15,7 +15,7 @@ public_subnet_cidrs = [
 
 
 
-public_key_path = "../ssh-keys/terrra-key-ec2.pub"
+key_name = "terraform-megha-project-dev-key"
 user_data_path  = "../scripts/user-data.sh"
 
 

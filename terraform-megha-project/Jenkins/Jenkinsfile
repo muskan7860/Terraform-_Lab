@@ -93,22 +93,6 @@ pipeline {
 
         }
 
-        stage('Workspace') {
-
-            steps {
-
-                dir("${INFRA_DIR}") {
-
-                    sh """
-                    terraform workspace select ${params.ENV} || terraform workspace new ${params.ENV}
-                    """
-
-                }
-
-            }
-
-        }
-
         stage('Validate') {
 
             steps {

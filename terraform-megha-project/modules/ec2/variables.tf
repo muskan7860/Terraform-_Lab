@@ -35,6 +35,9 @@ variable "security_group_id" {
   type        = string
 
 }
+variable "key_name" {
+  type = string
+}
 
 #SSH
 variable "key_name" {
