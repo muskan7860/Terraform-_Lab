@@ -116,7 +116,7 @@ pipeline {
                 dir("${INFRA_DIR}") {
 
                     sh '''
-                    terraform validate -var-file=terraform.tfvars
+                    terraform validate
                     terraform fmt -check
                     '''
 
