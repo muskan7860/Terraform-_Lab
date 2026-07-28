@@ -72,24 +72,31 @@ pipeline {
             steps {
                 dir('terraform-megha-project/backend') {
                     sh '''
+                        set +e
+
                         terraform init -upgrade=false
+                        INIT_STATUS=$?
+                        if [ "$INIT_STATUS" -ne 0 ]; then
+                            echo "Terraform init failed for backend module."
+                            exit "$INIT_STATUS"
+                        fi
 
                         aws s3api head-bucket \
                           --bucket terraform-megha-project-tfstate \
                           >/dev/null 2>&1
-
                         S3_EXISTS=$?
 
                         aws dynamodb describe-table \
                           --table-name terraform-megha-project-locks \
                           >/dev/null 2>&1
-
                         DDB_EXISTS=$?
 
                         if [ "$S3_EXISTS" -eq 0 ] && [ "$DDB_EXISTS" -eq 0 ]; then
                             echo "Backend already exists. Skipping creation."
                         else
-                            terraform apply -auto-approve
+                            echo "Backend resources are missing. Creating them now..."
+                            set -e
+                            terraform apply -auto-approve -input=false
                         fi
                     '''
                 }
