@@ -294,7 +294,7 @@ URL         : ${env.BUILD_URL}"
         always {
 
             archiveArtifacts artifacts: '**/tfplan', allowEmptyArchive: true
-            deleteDir()
+            #deleteDir()
 
         }
 
