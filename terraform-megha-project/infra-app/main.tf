@@ -21,12 +21,6 @@ module "security_group" {
   vpc_id         = module.vpc.vpc_id
 }
 
-#module "keypair" {
- # source          = "../modules/keypair"
-  #project_name    = var.project_name
-  #e#public_key_path = var.public_key_path
-#}
-
 module "ec2" {
 
   source = "../modules/ec2"

@@ -39,13 +39,14 @@ variable "availability_zone_count" {
   default = 2
 
 }
-variable "public_key_path" {
-  description = "Path to the SSH Public Key"
-  type        = string
-}
 
 variable "user_data_path" {
   description = "Path to user data script"
+  type        = string
+}
+
+variable "key_name" {
+  description = "Existing AWS Key Pair"
   type        = string
 }
 
