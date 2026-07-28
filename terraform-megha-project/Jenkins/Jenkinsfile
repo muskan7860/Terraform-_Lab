@@ -57,7 +57,7 @@ pipeline {
             steps {
                 dir('terraform-megha-project/backend') {
                     sh '''
-                        terraform init
+                        terraform init -upgrade=false
 
                         aws s3api head-bucket \
                           --bucket terraform-megha-project-tfstate \
@@ -90,7 +90,8 @@ pipeline {
                     sh """
                     terraform init \
                     -backend-config=../backend/${params.ENV}.hcl \
-                    -reconfigure
+                    -reconfigure \
+                    -upgrade=false
                     """
 
                 }
@@ -248,14 +249,22 @@ pipeline {
 
             echo "Deployment Successful"
 
-            // Uncomment after Slack Plugin installation
-            /*
-            slackSend(
-                channel: '#terraform-jenkins',
-                color: 'good',
-                message: "SUCCESS : ${params.ACTION} completed for ${params.ENV}"
-            )
-            */
+            withCredentials([string(credentialsId: 'terraform-slack-webhook', variable: 'SLACK_URL')]) {
+
+                sh """
+                curl -X POST \
+                -H 'Content-Type: application/json' \
+                --data '{
+                  "text":"✅ Terraform ${params.ACTION} SUCCESS
+
+Environment : ${params.ENV}
+Job         : ${env.JOB_NAME}
+Build       : #${env.BUILD_NUMBER}
+URL         : ${env.BUILD_URL}"
+                }' \
+                \$SLACK_URL
+                """
+            }
 
         }
 
@@ -263,13 +272,22 @@ pipeline {
 
             echo "Deployment Failed"
 
-            /*
-            slackSend(
-                channel: '#terraform-jenkins',
-                color: 'danger',
-                message: "FAILED : ${params.ACTION} for ${params.ENV}"
-            )
-            */
+            withCredentials([string(credentialsId: 'terraform-slack-webhook', variable: 'SLACK_URL')]) {
+
+                sh """
+                curl -X POST \
+                -H 'Content-Type: application/json' \
+                --data '{
+                  "text":"❌ Terraform ${params.ACTION} FAILED
+
+Environment : ${params.ENV}
+Job         : ${env.JOB_NAME}
+Build       : #${env.BUILD_NUMBER}
+URL         : ${env.BUILD_URL}"
+                }' \
+                \$SLACK_URL
+                """
+            }
 
         }
 
