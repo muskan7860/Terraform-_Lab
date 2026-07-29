@@ -1,196 +1,165 @@
+# terraform-megha-project
 
-# Terraform on AWS – Complete Project Documentation
+Production-style AWS infrastructure provisioned with modular Terraform, promoted through isolated environments (dev / stage / prod) via Terraform Workspaces, and automated end-to-end through a Jenkins CI/CD pipeline running on a self-hosted MicroK8s cluster.
 
-## Overview
-This document explains the complete Terraform project implemented on AWS using a production-style structure.
+This repo is built as a hands-on lab to practice the full loop a real infra team runs: write modular IaC → store state remotely and locked → validate/plan/apply by hand → then wrap the exact same commands in a CI/CD pipeline with manual approval gates, notifications, and environment parameters.
 
-### Objectives
-- Provision AWS infrastructure using Infrastructure as Code (IaC)
-- Use reusable Terraform modules
-- Store remote state in Amazon S3
-- Protect state with DynamoDB state locking
-- Separate environments using Terraform Workspaces (dev, stage, prod)
+---
 
-## Architecture
+## 🏗️ Architecture
 
-```text
-Developer
-   |
-terraform init/plan/apply
-   |
-Terraform Core
-   |
-AWS Provider
-   |
-+-----------------------------+
-| S3 Backend (Remote State)   |
-| DynamoDB (State Locking)    |
-+-----------------------------+
-            |
-            v
-        AWS Resources
-        ├── VPC
-        ├── Subnet
-        ├── Route Table
-        ├── Internet Gateway
-        ├── Security Group
-        ├── EC2
-        └── Key Pair
+```
+GitHub (source of truth)
+   │
+   ▼
+Jenkins (running as a Deployment on MicroK8s, in the "monitoring" namespace)
+   │  pipeline executes on a dedicated Jenkins agent pod ("terraform-agent" / jnlp),
+   │  NOT on the Jenkins controller
+   ▼
+Jenkinsfile pipeline:
+   Checkout → Verify Tools → Create Backend → Terraform Init → Workspace
+   → Validate → Terraform Plan → Manual Approval → Terraform Apply / Destroy
+   → Post Actions (archive plan, Slack notification)
+   │
+   ▼
+AWS (ap-south-1)
+   ┌─────────────────────────────────────────────┐
+   │  Remote backend (bootstrap layer)             │
+   │   S3 bucket    : terraform-megha-project-tfstate
+   │   DynamoDB     : terraform-megha-project-locks
+   ├─────────────────────────────────────────────┤
+   │  Application infra (infra-app layer)          │
+   │   VPC → Multi-AZ public subnets → IGW/RT      │
+   │   Security Group → Key Pair → EC2              │
+   └─────────────────────────────────────────────┘
+
+Supporting cluster services:
+   CoreDNS (in-cluster DNS resolution for the agent pod)
+   Cloudflare Tunnel (exposes Jenkins UI at a public domain, no open inbound ports)
 ```
 
-## Phase 1 – Backend
+## 🧰 Tech Stack
 
-Why remote backend?
-- Team collaboration
-- Single source of truth
-- Prevent state corruption
-- Enable locking
+| Layer | Tools |
+|---|---|
+| IaC | Terraform (modular, remote backend, workspaces) |
+| Cloud | AWS — VPC, Subnets, IGW, Route Tables, EC2, Security Groups, Key Pair, S3, DynamoDB |
+| CI/CD | Jenkins (Declarative Pipeline), running on Kubernetes as controller + dedicated agent pod |
+| Container platform | MicroK8s (single-node Kubernetes lab cluster) |
+| Source control | GitHub, with a `github-creds` credential in Jenkins |
+| Networking / exposure | Cloudflare Tunnel (public domain, no open ports); in-cluster CoreDNS |
+| Notifications | Slack webhook, posted on pipeline success/failure |
+| Secrets | Kubernetes Secret (`aws-credentials`) injected into the Jenkins agent Deployment as env vars |
 
-### Backend configuration
+## 📁 Project Structure
 
-```hcl
-terraform {
-  backend "s3" {}
-}
+```
+terraform-megha-project/
+├── backend/                       # Bootstraps the remote state backend itself
+│   ├── main.tf                    # Calls s3 + dynamodb modules
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── dev.hcl                    # Per-environment backend-config files
+│   ├── stage.hcl
+│   ├── prod.hcl
+│   └── .terraform.lock.hcl        # Committed so Jenkins doesn't re-resolve providers
+│
+├── infra-app/                     # Application infrastructure — VPC, EC2, etc.
+│   ├── main.tf                    # Calls vpc, security_group, keypair, ec2 modules
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── provider.tf
+│   ├── backend.tf                 # Partial backend config, completed via -backend-config
+│   └── .terraform.lock.hcl
+│
+├── modules/
+│   ├── vpc/
+│   ├── security_group/
+│   ├── keypair/
+│   ├── ec2/
+│   ├── s3/
+│   └── dynamodb/
+│
+└── Jenkins/
+    └── Jenkinsfile                 # Declarative pipeline: backend → infra-app, per environment
 ```
 
-Values supplied through backend configuration file.
+Backend state is intentionally split from application infra into **two separate root modules** (`backend/` and `infra-app/`) — the backend has to exist *before* `infra-app` can point Terraform at it remotely, so it can't bootstrap itself from within the same state file it manages.
 
-## What happens during terraform init?
+## ⚙️ Jenkins Pipeline Stages
 
-1. Reads backend block.
-2. Downloads provider plugins.
-3. Downloads modules.
-4. Configures backend.
-5. Connects to S3.
-6. Reads state.
-7. Configures workspace.
+```
+1. Declarative: Checkout SCM
+2. Clean Workspace           (deleteDir)
+3. Checkout                  (explicit re-clone with github-creds)
+4. Verify Tools              (terraform / aws / git versions + DNS debug block)
+5. Create Backend            (terraform init in backend/, creates S3 + DynamoDB if absent)
+6. Terraform Init            (infra-app/, using -backend-config per environment)
+7. Workspace                 (selects/creates dev | stage | prod workspace)
+8. Validate                  (terraform validate)
+9. Terraform Plan            (saved as an artifact: tfplan)
+10. Approval                 (manual gate before apply/destroy)
+11. Terraform Apply / Terraform Destroy   (environment- and action-parameterized)
+12. Declarative: Post Actions             (archiveArtifacts, Slack notification)
+```
 
-## State
+The pipeline is parameterized by **environment** (dev / stage / prod) and **action** (apply / destroy), so the same Jenkinsfile drives every environment and both directions of infrastructure lifecycle.
 
-Terraform state maps infrastructure to configuration.
+## 🔑 Prerequisites
 
-Without state Terraform would recreate infrastructure every execution.
+- MicroK8s cluster with Jenkins (controller + agent) deployed, and a Kubernetes Secret named `aws-credentials` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`) injected into the **Jenkins agent** Deployment's env — not just the controller
+- Jenkins credentials configured: `github-creds` (GitHub token, as Secret Text or Username/Password), a Slack webhook credential for notifications
+- AWS account with an IAM user/role permissioned for VPC, EC2, S3, and DynamoDB (including `dynamodb:DescribeTable`, `GetItem`, `PutItem`, `DeleteItem` for locking)
+- Working outbound DNS resolution from inside the cluster (see `EXPLANATION.md` — this was a real blocker)
 
-Commands:
+## ▶️ How to Run — Manually (before CI/CD)
 
 ```bash
-terraform state list
-terraform state show RESOURCE
-terraform state pull
-terraform state rm
+# 1. Bootstrap the remote backend (creates the S3 bucket + DynamoDB table)
+cd terraform-megha-project/backend
+terraform init
+terraform apply
+
+# 2. Point infra-app at that remote backend, per environment
+cd ../infra-app
+terraform init -backend-config=../backend/dev.hcl -reconfigure -upgrade=false
+terraform workspace new dev      # first time
+terraform workspace select dev
+
+terraform fmt -recursive
+terraform validate
+terraform plan
+terraform apply
+
+# Repeat with stage.hcl / prod.hcl + matching workspace to promote across environments
 ```
 
-## Workspaces
+## ▶️ How to Run — via Jenkins
 
-Environments:
-- dev
-- stage
-- prod
+1. Push changes to the `main` branch on GitHub
+2. Trigger (or let webhook trigger) the `terraform-pipeline` job in Jenkins
+3. Select the **environment** (dev / stage / prod) and **action** (apply / destroy) build parameters
+4. Review the `Terraform Plan` stage output, then approve at the manual `Approval` gate
+5. Watch for the Slack notification confirming success or failure, with a direct link to the build
 
-Each workspace keeps an independent state file.
+## 🚧 Known Operational Notes
 
-## Modules
+- The Jenkins agent (`jnlp` container) had **no AWS credentials** by default — they were added to the Jenkins **controller** first by mistake, which does nothing, since Terraform actually executes on the **agent** pod. Fixed by patching the `aws-credentials` Secret into the `jenkins-agent` Deployment's env.
+- In-cluster DNS initially failed to resolve any external hostname (AWS endpoints, `registry.terraform.io`, even `google.com`) due to a misconfigured CoreDNS `forward` directive creating an invalid loop back to the cluster's own resolver. Fixed by forwarding explicitly to real upstream DNS servers.
+- Terraform provider plugin caching (`~/.terraformrc` + `~/.terraform.d/plugin-cache`) was configured but not yet confirmed to be effectively used by every pipeline run — the agent was still shown "Installing" rather than "Using ... from the shared cache" in at least one run.
+- The cluster is a long-running (~96-day) single-node MicroK8s lab instance; several core `kube-system` pods (CoreDNS, Calico, hostpath-provisioner) had accumulated high restart counts, which is worth a periodic `microk8s stop && microk8s start` maintenance window.
 
-Project contains reusable modules for:
+## 🗺️ Roadmap
 
-- VPC
-- Security Group
-- EC2
-- Key Pair
+| Phase | Scope | Status |
+|---|---|---|
+| Phase 1 | Terraform foundation — remote backend, workspaces, modules, VPC, EC2, SG, dynamic AMI/AZ, Multi-AZ subnets | ✅ Complete |
+| Phase 2 | Jenkins CI/CD — parameterized pipeline (init → validate → plan → manual approval → apply/destroy), Slack notifications, backend/infra-app split | 🟡 Built, actively being hardened (credentials, DNS, provider caching) |
+| Phase 3 | Docker | Planned |
+| Phase 4 | Kubernetes | Planned |
+| Phase 5 | GitOps with ArgoCD | Planned |
 
-Benefits:
-- Reuse
-- Maintainability
-- Consistency
+## 📄 Companion Docs
 
-## Troubleshooting Encountered
-
-### Backend asked for bucket name
-
-Cause:
-Backend block contained values while backend config was incomplete.
-
-Solution:
-
-```bash
-terraform init -reconfigure -backend-config=../backend/dev.hcl
-```
-
-### No state file found
-
-Cause:
-Workspace had empty remote state.
-
-Diagnosis:
-
-```bash
-terraform workspace show
-terraform state pull
-```
-
-### Workspace not found
-
-Cause:
-Workspace never created in backend.
-
-Create:
-
-```bash
-terraform workspace new dev
-```
-
-### Destroy returned 0 resources
-
-Reason:
-Remote state was empty although AWS resources still existed.
-
-### BucketNotEmpty error
-
-Reason:
-Versioned S3 bucket still contained state versions.
-
-Solution:
-Delete object versions first, then destroy bucket.
-
-## Interview Questions
-
-### What is Terraform State?
-
-Answer:
-Terraform State is a mapping database maintained by Terraform that stores metadata about deployed infrastructure so Terraform can determine what already exists and what must change.
-
-### Why use S3 backend?
-
-Answer:
-To centralize state, enable collaboration, improve durability, and avoid local state conflicts.
-
-### Why DynamoDB?
-
-Answer:
-To provide state locking so multiple engineers cannot modify the same infrastructure simultaneously.
-
-### Why Modules?
-
-Answer:
-To improve reuse, readability, consistency, scalability, and maintenance.
-
-### Difference between terraform plan and apply?
-
-plan computes execution changes only.
-apply executes those changes.
-
-## Best Practices
-
-- Never commit tfstate.
-- Enable bucket versioning.
-- Enable encryption.
-- Use remote backend.
-- Use modules.
-- Keep environments isolated.
-- Store secrets securely.
-- Review plan before apply.
-
-## Project Summary
-
-This project provisions AWS infrastructure using reusable Terraform modules with an S3 remote backend, DynamoDB locking, and workspace-based environment separation. During implementation we configured backend initialization, migrated state, diagnosed workspace/state issues, handled manual resource drift, managed versioned S3 cleanup, and validated deployments across dev, stage, and prod environments.
+- [`EXPLANATION.md`](./EXPLANATION.md) — lesson-by-lesson walkthrough of every block built, in order, including every real error hit (Terraform and Jenkins/Kubernetes/DNS) and how it was diagnosed and fixed
+- [`INTERVIEW_QA.md`](./INTERVIEW_QA.md) — interview questions and spoken-style answers based directly on the decisions and troubleshooting done in this project
